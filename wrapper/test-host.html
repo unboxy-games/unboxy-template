@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Unboxy SDK Test Host</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, sans-serif; background: #0f1117; color: #ddd; }
+    header { padding: 10px 16px; background: #1a1d27; border-bottom: 1px solid #2a2d3a; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    header label { font-size: 13px; }
+    header input, header select, header button { background: #242736; color: #ddd; border: 1px solid #2a2d3a; padding: 4px 8px; border-radius: 4px; font-size: 13px; }
+    header button { cursor: pointer; }
+    .log { background: #0a0c12; color: #9c9; font-family: monospace; font-size: 11px; padding: 6px 10px; border-bottom: 1px solid #2a2d3a; max-height: 120px; overflow-y: auto; white-space: pre-wrap; }
+    .log .err { color: #f88; }
+    iframe { width: 100%; height: calc(100vh - 180px); border: 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <label>gameId: <input id="gameId" value="intro-test" size="20" /></label>
+    <label>user:
+      <select id="userMode">
+        <option value="auth">authenticated</option>
+        <option value="anon">anonymous (user=null)</option>
+      </select>
+    </label>
+    <label>userId: <input id="userId" value="test-user-1" size="20" /></label>
+    <label>backend: <input id="apiBase" value="http://localhost:8080" size="25" /></label>
+    <button id="reload">Reload iframe</button>
+    <button id="clearSaves">Clear saves (backend)</button>
+    <button id="clearLocal">Clear localStorage</button>
+  </header>
+  <div class="log" id="log"></div>
+  <iframe id="game" src="http://localhost:5180/"></iframe>
+
+  <script>
+    // Mock home-ui's UnboxyRpcHost — responds to unboxy:hello with an init
+    // payload and forwards allow-listed RPC methods to the backend. Mirrors
+    // what lives in unboxy-home-ui/src/hooks/useUnboxyRpcHost.ts so games
+    // can be exercised against the real backend without logging into home-ui.
+
+    const PROTOCOL_VERSION = 1;
+    const gameIdInput = document.getElementById('gameId');
+    const userModeInput = document.getElementById('userMode');
+    const userIdInput = document.getElementById('userId');
+    const apiBaseInput = document.getElementById('apiBase');
+    const iframe = document.getElementById('game');
+    const logEl = document.getElementById('log');
+
+    function log(msg, cls) {
+      const line = document.createElement('div');
+      if (cls) line.className = cls;
+      line.textContent = new Date().toLocaleTimeString() + '  ' + msg;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // NOTE: this test host does NOT carry a real Cognito JWT. Backend endpoints
+    // require auth, so in authenticated mode the calls will get 401 unless you
+    // paste a token below. For real auth testing, use through home-ui.
+    const bearerToken = new URLSearchParams(location.search).get('token') || '';
+
+    async function backendCall(method, path, body) {
+      const res = await fetch(apiBaseInput.value + path, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (res.status === 404) return null;
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        const err = new Error(`HTTP ${res.status}: ${text}`);
+        err.status = res.status;
+        throw err;
+      }
+      if (res.status === 204) return { deleted: true };
+      return res.json();
+    }
+
+    const HANDLERS = {
+      'saves.get': async (gameId, userId, params) => {
+        const r = await backendCall('GET', `/games/${encodeURIComponent(gameId)}/saves/${encodeURIComponent(params.key)}`);
+        return r ?? { value: null, version: null };
+      },
+      'saves.set': async (gameId, userId, params) => {
+        return backendCall('PUT', `/games/${encodeURIComponent(gameId)}/saves/${encodeURIComponent(params.key)}`, {
+          value: params.value, ifVersion: params.ifVersion,
+        });
+      },
+      'saves.delete': async (gameId, userId, params) => {
+        return backendCall('DELETE', `/games/${encodeURIComponent(gameId)}/saves/${encodeURIComponent(params.key)}`);
+      },
+      'saves.list': async (gameId) => {
+        return backendCall('GET', `/games/${encodeURIComponent(gameId)}/saves`);
+      },
+    };
+
+    window.addEventListener('message', async (event) => {
+      if (event.source !== iframe.contentWindow) return;
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+
+      if (data.type === 'unboxy:hello') {
+        const user = userModeInput.value === 'auth'
+          ? { id: userIdInput.value, name: userIdInput.value }
+          : null;
+        log(`handshake · user=${user ? user.id : 'null'} gameId=${gameIdInput.value}`);
+        iframe.contentWindow.postMessage({
+          type: 'unboxy:init',
+          protocolVersion: PROTOCOL_VERSION,
+          gameId: gameIdInput.value,
+          user,
+          capabilities: ['saves'],
+        }, '*');
+        return;
+      }
+
+      if (data.type === 'unboxy:rpc') {
+        const reply = (body) => iframe.contentWindow.postMessage({ type: 'unboxy:rpc.result', id: data.id, ...body }, '*');
+        const userId = userModeInput.value === 'auth' ? userIdInput.value : null;
+        const handler = HANDLERS[data.method];
+        if (!handler) {
+          log(`rpc ${data.method} -> UNKNOWN_METHOD`, 'err');
+          reply({ ok: false, error: { code: 'UNKNOWN_METHOD', message: data.method } });
+          return;
+        }
+        try {
+          const result = await handler(gameIdInput.value, userId, data.params || {});
+          log(`rpc ${data.method} -> ok ${JSON.stringify(result).slice(0, 80)}`);
+          reply({ ok: true, result });
+        } catch (err) {
+          log(`rpc ${data.method} -> err ${err.message}`, 'err');
+          const code = err.status === 401 ? 'UNAUTHENTICATED'
+            : err.status === 409 ? 'VERSION_MISMATCH'
+            : err.status === 413 ? 'QUOTA_EXCEEDED'
+            : 'INTERNAL';
+          reply({ ok: false, error: { code, message: err.message } });
+        }
+      }
+    });
+
+    document.getElementById('reload').onclick = () => {
+      iframe.src = iframe.src;
+    };
+    document.getElementById('clearLocal').onclick = () => {
+      const removed = [];
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('unboxy:saves:')) { removed.push(k); localStorage.removeItem(k); }
+      }
+      // Also tell the iframe's localStorage via cross-origin trick? can't. User must reload the iframe manually.
+      log(`cleared ${removed.length} parent localStorage keys (reload iframe to clear iframe's)`);
+    };
+    document.getElementById('clearSaves').onclick = async () => {
+      try {
+        const list = await HANDLERS['saves.list'](gameIdInput.value);
+        for (const k of list.keys || []) await HANDLERS['saves.delete'](gameIdInput.value, userIdInput.value, { key: k });
+        log(`cleared ${(list.keys || []).length} backend keys`);
+      } catch (err) {
+        log('clearSaves failed: ' + err.message, 'err');
+      }
+    };
+
+    log('test host ready — pass ?token=<jwt> in URL for authenticated backend calls');
+  </script>
+</body>
+</html>

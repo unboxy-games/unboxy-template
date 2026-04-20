@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Unboxy - Galaxian</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0f1117;
+      color: #e0e0e0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Fixed header - mimics GameDetail header */
+    .header {
+      background: #1a1d27;
+      border-bottom: 1px solid #2a2d3a;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .back-btn {
+      background: none;
+      border: none;
+      color: #888;
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+    .back-btn:hover { background: #2a2d3a; color: #fff; }
+
+    .game-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .status-badge {
+      font-size: 12px;
+      padding: 3px 10px;
+      border-radius: 12px;
+      background: #1a3a2a;
+      color: #4ade80;
+      border: 1px solid #2a5a3a;
+    }
+
+    /* Main layout - split panel */
+    .main {
+      display: flex;
+      height: calc(100vh - 53px);
+      padding: 16px;
+      gap: 8px;
+    }
+
+    /* Chat panel (left) */
+    .chat-panel {
+      width: 33%;
+      min-width: 280px;
+      background: #1a1d27;
+      border-radius: 16px;
+      border: 1px solid #2a2d3a;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .chat-header {
+      padding: 16px;
+      border-bottom: 1px solid #2a2d3a;
+      font-size: 14px;
+      color: #888;
+    }
+
+    .chat-messages {
+      flex: 1;
+      padding: 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .chat-msg {
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+      max-width: 85%;
+    }
+
+    .chat-msg.assistant {
+      background: #242736;
+      color: #e0e0e0;
+      align-self: flex-start;
+    }
+
+    .chat-msg.user {
+      background: #3b5bdb;
+      color: #fff;
+      align-self: flex-end;
+    }
+
+    .chat-input-area {
+      padding: 12px 16px;
+      border-top: 1px solid #2a2d3a;
+    }
+
+    .chat-input {
+      width: 100%;
+      background: #242736;
+      border: 1px solid #2a2d3a;
+      border-radius: 12px;
+      padding: 12px 16px;
+      color: #e0e0e0;
+      font-size: 14px;
+      outline: none;
+    }
+    .chat-input::placeholder { color: #555; }
+
+    /* Game panel (right) */
+    .game-panel {
+      flex: 1;
+      background: #1a1d27;
+      border-radius: 16px;
+      border: 1px solid #2a2d3a;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .game-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding: 8px 12px;
+      gap: 8px;
+      border-bottom: 1px solid #2a2d3a;
+    }
+
+    .toolbar-btn {
+      background: #242736;
+      border: 1px solid #2a2d3a;
+      color: #ccc;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .toolbar-btn:hover { background: #2a2d3a; color: #fff; }
+    .toolbar-btn.primary {
+      background: #3b5bdb;
+      border-color: #3b5bdb;
+      color: #fff;
+    }
+    .toolbar-btn.primary:hover { background: #4c6ef5; }
+
+    .game-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background: #000;
+    }
+
+    .game-container iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
+
+    /* Fullscreen mode */
+    .game-panel.fullscreen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      border-radius: 0;
+      border: none;
+    }
+
+    .game-panel.fullscreen .game-toolbar {
+      display: none;
+    }
+
+    .game-panel.fullscreen .exit-fs-btn {
+      display: block;
+    }
+
+    .game-panel.fullscreen .game-container {
+      position: absolute;
+      inset: 0;
+    }
+
+    /* Force landscape on portrait mobile via CSS rotation */
+    @media (orientation: portrait) {
+      .game-panel.fullscreen .game-container {
+        transform: rotate(90deg);
+        transform-origin: center center;
+        width: 100vh;
+        height: 100vw;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        margin-top: -50vw;
+        margin-left: -50vh;
+      }
+
+      .game-panel.fullscreen .exit-fs-btn {
+        /* Rotate button back so it stays upright after container rotation */
+        transform: rotate(-90deg);
+      }
+    }
+
+    /* Floating exit button for fullscreen */
+    .exit-fs-btn {
+      display: none;
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 20;
+      background: rgba(0, 0, 0, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      font-size: 20px;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    }
+
+    .exit-fs-btn.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Scale mode selector */
+    .scale-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 8px;
+    }
+
+    .scale-controls label {
+      font-size: 12px;
+      color: #888;
+    }
+
+    .scale-controls select {
+      background: #242736;
+      border: 1px solid #2a2d3a;
+      color: #ccc;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      outline: none;
+    }
+
+    /* Device simulation */
+    .device-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .device-btn {
+      background: #242736;
+      border: 1px solid #2a2d3a;
+      color: #888;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .device-btn:hover, .device-btn.active {
+      background: #2a2d3a;
+      color: #fff;
+      border-color: #3b5bdb;
+    }
+
+    /* Simulated device frame */
+    .game-container.device-sim {
+      background: #111;
+    }
+
+    .game-container.device-sim iframe {
+      width: var(--device-w, 100%);
+      height: var(--device-h, 100%);
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 8px;
+      box-shadow: 0 0 30px rgba(0,0,0,0.5);
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .main {
+        flex-direction: column;
+        padding: 8px;
+      }
+      .chat-panel {
+        width: 100%;
+        min-width: unset;
+        max-height: 30vh;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <button class="back-btn" onclick="history.back()">←</button>
+    <span class="game-title">Galaxian</span>
+    <span class="status-badge">● Published</span>
+  </div>
+</div>
+
+<div class="main">
+  <!-- Chat panel -->
+  <div class="chat-panel">
+    <div class="chat-header">Chat</div>
+    <div class="chat-messages">
+      <div class="chat-msg assistant">Welcome to Unboxy! Describe the game you'd like to build.</div>
+      <div class="chat-msg user">Build me a Galaxian-style space shooter with enemy formations that dive-bomb!</div>
+      <div class="chat-msg assistant">Your Galaxian game is ready! Use arrow keys to move and space to shoot. Enemies will dive-bomb you in curved patterns. Good luck!</div>
+    </div>
+    <div class="chat-input-area">
+      <input class="chat-input" placeholder="Describe changes to your game..." disabled />
+    </div>
+  </div>
+
+  <!-- Game panel -->
+  <div class="game-panel" id="gamePanel">
+    <button class="exit-fs-btn" id="exitFsBtn" onclick="toggleFullscreen()">✕</button>
+    <div class="game-toolbar">
+      <div class="device-controls">
+        <button class="device-btn active" onclick="setDevice('full')">Desktop</button>
+        <button class="device-btn" onclick="setDevice('ipad')">iPad</button>
+        <button class="device-btn" onclick="setDevice('iphone-h')">iPhone ↔</button>
+        <button class="device-btn" onclick="setDevice('iphone-v')">iPhone ↕</button>
+      </div>
+      <div class="scale-controls">
+        <label>Scale:</label>
+        <select id="scaleMode" onchange="changeScale(this.value)">
+          <option value="FIT" selected>FIT (letterbox)</option>
+          <option value="ENVELOP">ENVELOP (crop)</option>
+          <option value="RESIZE">RESIZE (adaptive)</option>
+          <option value="NONE">NONE (1:1)</option>
+        </select>
+      </div>
+      <button class="toolbar-btn" onclick="toggleFullscreen()">
+        <span id="fsIcon">⛶</span>
+        <span id="fsLabel">Full Screen</span>
+      </button>
+    </div>
+    <div class="game-container" id="gameContainer">
+      <iframe
+        id="gameIframe"
+        src="./game/index.html"
+        title="Game Preview"
+        allow="fullscreen"
+        sandbox="allow-scripts allow-same-origin"
+      ></iframe>
+    </div>
+  </div>
+</div>
+
+<script>
+  const gamePanel = document.getElementById('gamePanel');
+  const gameContainer = document.getElementById('gameContainer');
+  const gameIframe = document.getElementById('gameIframe');
+  const exitFsBtn = document.getElementById('exitFsBtn');
+  let isFullscreen = false;
+  let hideTimer = null;
+
+  function toggleFullscreen() {
+    isFullscreen = !isFullscreen;
+    gamePanel.classList.toggle('fullscreen', isFullscreen);
+    document.getElementById('fsLabel').textContent = isFullscreen ? 'Exit Full Screen' : 'Full Screen';
+
+    if (isFullscreen) {
+      // Try native fullscreen (works on desktop, not iOS)
+      gamePanel.requestFullscreen?.().catch(() => {});
+      // Show exit button briefly
+      showExitBtn();
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+      exitFsBtn.classList.remove('visible');
+    }
+  }
+
+  function showExitBtn() {
+    if (!isFullscreen) return;
+    exitFsBtn.classList.add('visible');
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => exitFsBtn.classList.remove('visible'), 3000);
+  }
+
+  // Tap anywhere on fullscreen game to show exit button
+  gamePanel.addEventListener('click', (e) => {
+    if (isFullscreen && e.target !== exitFsBtn) {
+      showExitBtn();
+    }
+  });
+
+  // Exit fullscreen on Escape
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && isFullscreen) {
+      isFullscreen = false;
+      gamePanel.classList.remove('fullscreen');
+      document.getElementById('fsLabel').textContent = 'Full Screen';
+      exitFsBtn.classList.remove('visible');
+    }
+  });
+
+  function setDevice(device) {
+    // Update active button
+    document.querySelectorAll('.device-btn').forEach(b => b.classList.remove('active'));
+    event.target.classList.add('active');
+
+    const sizes = {
+      'full': { w: '100%', h: '100%', sim: false },
+      'ipad': { w: '1024px', h: '768px', sim: true },
+      'iphone-h': { w: '844px', h: '390px', sim: true },
+      'iphone-v': { w: '390px', h: '844px', sim: true },
+    };
+
+    const s = sizes[device];
+    if (s.sim) {
+      gameContainer.classList.add('device-sim');
+      gameContainer.style.setProperty('--device-w', s.w);
+      gameContainer.style.setProperty('--device-h', s.h);
+    } else {
+      gameContainer.classList.remove('device-sim');
+      gameContainer.style.removeProperty('--device-w');
+      gameContainer.style.removeProperty('--device-h');
+    }
+  }
+
+  function changeScale(mode) {
+    // Post message to iframe to change scale mode at runtime
+    gameIframe.contentWindow.postMessage({ type: 'changeScale', mode }, '*');
+  }
+</script>
+
+</body>
+</html>
